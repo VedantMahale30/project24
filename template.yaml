@@ -7,6 +7,10 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: s3://bb07project/input1/   # Replace with your actual bucket name
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: 's3:ObjectCreated:*'
+            Function: !GetAtt LambdaInvokeCrawler.Arn
 
   # Lambda Function to Invoke Glue Crawler
   LambdaInvokeCrawler:
@@ -31,16 +35,6 @@ Resources:
                   'statusCode': 200,
                   'body': json.dumps('Crawler started')
               }
-
-  # S3 Bucket Notification to Trigger Lambda
-  S3BucketNotification:
-    Type: AWS::S3::BucketNotification
-    Properties:
-      Bucket: !Ref DataBucket
-      NotificationConfiguration:
-        LambdaConfigurations:
-          - Event: 's3:ObjectCreated:*'
-            Function: !GetAtt LambdaInvokeCrawler.Arn
 
   # Permission for S3 to invoke Lambda
   LambdaInvokePermission:
