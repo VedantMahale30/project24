@@ -1,25 +1,30 @@
-name: create a ec2 instance
+name: lambdacreate
 on:
   push:
     branches: [ main ]
 
 jobs:
   Deployment:
-    name: create EC2 Instance
+    name: lambdacreate
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout the code
-        uses: actions/checkout@v1
+        uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v2
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.7'
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install awscli
-      - run: aws cloudformation create-stack --stack-name ec2-example --template-body file://template.yaml
+
+      - name: Create Lambda Function via CloudFormation
+        run: |
+          aws cloudformation create-stack --stack-name lambda-example --template-body file://lambda-template.yaml
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_KEY }}
