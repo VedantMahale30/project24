@@ -1,46 +1,99 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: AWS CloudFormation Template for Glue Job and Lambda Functions triggered by S3
+Description: AWS CloudFormation Template to create an S3 bucket, Glue Database, Glue Crawler, Glue Job, and Lambda Function to trigger them
+
+Parameters:
+  bb07project:
+    Type: String
+    Description: Name of the existing S3 bucket with data
+
+  bb07projectop:
+    Type: String
+    Description: Name of the new S3 bucket where processed data will be stored
 
 Resources:
-  # S3 Bucket
-  DataBucket:
-    Type: AWS::S3::Bucket
+  GlueDatabase:
+    Type: 'AWS::Glue::Database'
     Properties:
-      BucketName: bb07project # Replace with your actual bucket name
-      NotificationConfiguration:
-        LambdaConfigurations:
-          - Event: 's3:ObjectCreated:*'
-            Function: !GetAtt LambdaInvokeCrawler.Arn
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: projectDB
+        Description: "Glue database for storing metadata"
 
-  # Lambda Function to Invoke Glue Crawler
-  LambdaInvokeCrawler:
-    Type: AWS::Lambda::Function
+  GlueCrawler:
+    Type: 'AWS::Glue::Crawler'
     Properties:
-      FunctionName: 'InvokeGlueCrawler'
-      Handler: LambdaCodeRunCrawler.lambda_handler
-      Role: arn:aws:iam::034552991439:role/LabRole  # Replace with your existing role ARN
+      Name: first_crawler
+      Role: !Sub arn:aws:iam::034552991439:role/LabRole
+      DatabaseName: !Ref GlueDatabase
+      Targets:
+        S3Targets:
+          - Path: !Sub 's3://${bb07project}/crawlertarget/'
+      SchemaChangePolicy:
+        UpdateBehavior: UPDATE_IN_DATABASE
+        DeleteBehavior: LOG
+
+  GlueJob:
+    Type: 'AWS::Glue::Job'
+    Properties:
+      Name: first_job
+      Role: !Sub arn:aws:iam::034552991439:role/LabRole  
+      Command:
+        Name: glueetl
+        ScriptLocation: !Sub 's3://bb07scripts/FinalScriptgluejob.py'
+        PythonVersion: 3.9
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-enable"
+      MaxRetries: 1
+      GlueVersion: "3.0"
+      Timeout: 1440
+      MaxCapacity: 4
+      Tags:
+        Project: AMLProcessing
+        Owner: Vedant
+
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - glue:StartCrawler
+                  - glue:StartJobRun
+                  - glue:GetCrawler
+                Resource: '*'
+
+  TriggerLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: StartGlueCrawlerAndJob
+      Handler: index.handler
+      Role: !Sub arn:aws:iam::034552991439:role/LabRole
       Runtime: python3.9
       Code:
         ZipFile: |
-          import json
           import boto3
 
-          glue = boto3.client('glue')
+          def handler(event, context):
+              glue = boto3.client('glue')
+              
+              # Start Glue Crawler
+              glue.start_crawler(Name='first_crawler')
+              
+              # Wait for crawler to finish (you can add additional logic here to handle status checking)
+              glue.get_waiter('crawler_ready').wait(Name='first_crawler')
+              
+              # Start Glue Job
+              glue.start_job_run(JobName='first_job')
 
-          def lambda_handler(event, context):
-              response = glue.start_crawler(
-                  Name='newone'  # Replace with your actual Glue Crawler name
-              )
-              return {
-                  'statusCode': 200,
-                  'body': json.dumps('Crawler started')
-              }
-
-  # Permission for S3 to invoke Lambda
-  LambdaInvokePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: 'lambda:InvokeFunction'
-      FunctionName: !Ref LambdaInvokeCrawler
-      Principal: 's3.amazonaws.com'
-      SourceArn: !GetAtt DataBucket.arn
+      Timeout: 900
